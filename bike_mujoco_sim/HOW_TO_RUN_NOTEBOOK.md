@@ -38,7 +38,10 @@ In that terminal:
 
 ```powershell
 cd bike_mujoco_sim
+python --version
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 python -m jupyter lab
 ```
 
