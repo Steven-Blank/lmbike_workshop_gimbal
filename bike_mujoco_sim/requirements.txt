@@ -5,7 +5,8 @@
 # local notebook server. Do not add jupyter, notebook, or ipykernel here:
 # installing them on Google Colab replaces Colab's Jupyter, and Colab then
 # rejects the notebook because the versions differ.
-mujoco>=3.2.0
+# Keep the viewer API and lesson dynamics on the workshop's tested release.
+mujoco==3.16.0
 numpy>=1.26
 scipy>=1.11
 matplotlib>=3.8

@@ -8,8 +8,14 @@ stops the turn.
 from __future__ import annotations
 
 import os
+import json
+from pathlib import Path
+import queue
 import struct
+import subprocess
+import sys
 import threading
+from collections import deque
 
 from .config import Config
 
@@ -206,7 +212,7 @@ class HardwareJoystick:
             self._fd = None
 
 
-class JoystickWindow:
+class _TkJoystickWindow:
     """Always-on-top stick. Call poll() from the simulation thread; Tk stays there."""
 
     def __init__(self, stick: StickInput) -> None:
@@ -406,6 +412,146 @@ class JoystickWindow:
             root.destroy()
         except tk.TclError:
             pass
+
+
+def _apply_window_event(stick: StickInput, event: dict) -> None:
+    """Apply a floating-window input on the simulation side of the pipe."""
+    kind = event.get("event")
+    if kind == "mouse":
+        stick.set_mouse(float(event["x"]), float(event["y"]), bool(event["down"]))
+    elif kind == "key" and event.get("name") in {"up", "down", "left", "right"}:
+        stick.set_key(event["name"], bool(event["pressed"]))
+    elif kind == "reset":
+        stick.request_reset()
+    elif kind == "push":
+        stick.request_push(float(event["speed"]))
+
+
+class _ProcessJoystickWindow:
+    """Keep macOS Tk in an ordinary Python process, separate from mjpython."""
+
+    def __init__(self, stick: StickInput) -> None:
+        self.stick = stick
+        self._process: subprocess.Popen | None = None
+        self._events: queue.Queue = queue.Queue()
+        self._ready = threading.Event()
+        self._started = False
+        self._threads: list[threading.Thread] = []
+        self._errors: deque[str] = deque(maxlen=20)
+        self._fallen = False
+        self._last_status = None
+        self._released = False
+
+    def start(self) -> None:
+        python = Path(sys.prefix) / "bin" / "python"
+        if not python.is_file():
+            python = Path(sys.executable)
+        env = os.environ.copy()
+        for name in ("MJPYTHON_BIN", "MJPYTHON_LIBPYTHON"):
+            env.pop(name, None)
+        process = subprocess.Popen(
+            [str(python), "-m", "sim.joystick_ui"],
+            cwd=str(Path(__file__).resolve().parents[1]), env=env,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", bufsize=1,
+        )
+        self._process = process
+
+        def receive() -> None:
+            try:
+                for line in process.stdout:
+                    event = json.loads(line)
+                    if event.get("event") == "ready":
+                        self._started = True
+                        self._ready.set()
+                    else:
+                        self._events.put(event)
+            finally:
+                self._ready.set()
+
+        def errors() -> None:
+            for line in process.stderr:
+                self._errors.append(line.rstrip())
+
+        self._threads = [
+            threading.Thread(target=receive, daemon=True),
+            threading.Thread(target=errors, daemon=True),
+        ]
+        for thread in self._threads:
+            thread.start()
+        if not self._ready.wait(10.0) or not self._started:
+            self.close()
+            raise RuntimeError(
+                "The joystick window could not start in the workshop Python. "
+                "Check that this environment includes Tk.\n" + "\n".join(self._errors)
+            )
+
+    def _send(self, command: dict) -> bool:
+        process = self._process
+        if process is None or process.poll() is not None:
+            return False
+        try:
+            process.stdin.write(json.dumps(command) + "\n")
+            process.stdin.flush()
+            return True
+        except (BrokenPipeError, OSError, ValueError):
+            return False
+
+    def set_fallen(self, fallen: bool) -> None:
+        self._fallen = bool(fallen)
+
+    def poll(self) -> None:
+        while True:
+            try:
+                event = self._events.get_nowait()
+            except queue.Empty:
+                break
+            _apply_window_event(self.stick, event)
+        process = self._process
+        if process is None:
+            return
+        if process.poll() is not None:
+            if not self._released:
+                self.stick.set_mouse(0.0, 0.0, False)
+                for key in ("up", "down", "left", "right"):
+                    self.stick.set_key(key, False)
+                self._released = True
+            if process.returncode:
+                raise RuntimeError("Joystick window stopped unexpectedly:\n" + "\n".join(self._errors))
+            return
+        status = (self.stick.axes(), self._fallen)
+        if status != self._last_status:
+            self._send({"command": "status", "axes": status[0], "fallen": status[1]})
+            self._last_status = status
+
+    def close(self) -> None:
+        process = self._process
+        if process is None:
+            return
+        self._send({"command": "close"})
+        if process.stdin:
+            try:
+                process.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
+        try:
+            process.wait(timeout=3.0)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        for thread in self._threads:
+            thread.join(timeout=1.0)
+        for pipe in (process.stdout, process.stderr):
+            if pipe:
+                pipe.close()
+        self._process = None
+
+
+JoystickWindow = _ProcessJoystickWindow if sys.platform == "darwin" else _TkJoystickWindow
 
 
 def _clip(value: float) -> float:

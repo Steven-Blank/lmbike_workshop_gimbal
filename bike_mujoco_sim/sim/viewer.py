@@ -187,21 +187,51 @@ def _play_inline(sim: SimHandles) -> None:
     print(f"Ride finished ({duration:.1f}s).", flush=True)
 
 
+def _open_windows(sim, stick, hardware, key_callback):
+    """Open one viewer, allowing the previous macOS window to finish closing."""
+    from mujoco import viewer as mj_viewer
+
+    handle = None
+    window = None
+    deadline = time.monotonic() + 5.0
+    try:
+        while True:
+            try:
+                handle = mj_viewer.launch_passive(sim.model, sim.data, key_callback=key_callback)
+                break
+            except RuntimeError as exc:
+                if sys.platform == "darwin" and "requires that the Python script" in str(exc):
+                    raise RuntimeError(
+                        "On macOS, start Jupyter with `python start_notebooks.py`, "
+                        "select the 'Bike MuJoCo sim' kernel, and restart the kernel. "
+                        "For a terminal GUI run, use `mjpython run_sim.py ...`."
+                    ) from exc
+                if (sys.platform != "darwin" or "another MuJoCo viewer is already open" not in str(exc)
+                        or time.monotonic() >= deadline):
+                    raise
+                time.sleep(0.05)
+        if sim.mode == "remote":
+            window = JoystickWindow(stick)
+            window.start()
+        return handle, window
+    except BaseException:
+        if window is not None:
+            window.close()
+        hardware.close()
+        if handle is not None:
+            handle.close()
+        raise
+
+
 def run_viewer(sim: SimHandles) -> None:
     if "google.colab" in sys.modules:
         _play_inline(sim)
         return
     _ensure_gui_display()
     os.environ.setdefault("MUJOCO_GL", "glfw")
-    from mujoco import viewer as mj_viewer
-
     cfg = sim.cfg
     stick = StickInput()
     hardware = HardwareJoystick()
-    window: JoystickWindow | None = None
-    if sim.mode == "remote":
-        window = JoystickWindow(stick)
-        window.start()
     key_until: dict[int, float] = {}
 
     def key_callback(key: int) -> None:
@@ -213,7 +243,7 @@ def run_viewer(sim: SimHandles) -> None:
             return
         apply_key(sim.goals, key, cfg)
 
-    handle = mj_viewer.launch_passive(sim.model, sim.data, key_callback=key_callback)
+    handle, window = _open_windows(sim, stick, hardware, key_callback)
     print("Remote stick (floating window, or hold arrows — they grow, then spring back):")
     print("  Up/Down     speed around cruise")
     print("  Left/Right  turn rate")
