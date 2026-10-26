@@ -1,4 +1,15 @@
-# Bike workshop
+#Bike Workshop 2 
+## Download CP2102 Drive
+Download Link ： https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads / or you can click the file "CP2102-driver-setup-clickable.pdf" above to direct you to the download page. 
+## For Windows users： 
+Download CP210x Universal Windows Driver, unzip it.
+Right click silabser.inf file and install it.
+
+## For MacOS: users:
+Download CP210x VCP Mac OSX Driver, unzip it.
+Double click SiLabsUSBDriverDIsk.dmg and install CP210x VCP Driver.app.
+
+# Bike workshop 1
 
 This repository is the workshop package. It has two parts: a MuJoCo bicycle simulation, and the firmware for a phone gimbal. Install Git and an editor, clone the repository, then open the folder you are working on.
 
