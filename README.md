@@ -1,14 +1,21 @@
 # Bike Workshop 2 
+
 ## Download CP2102 Drive
+
 Download Link ： https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads  
 or you can click the file "CP2102-driver-setup-clickable.pdf" above to direct you to the download page. 
+
 ## For Windows users： 
+
 1. Download **CP210x Universal Windows Driver**, unzip it.
 2. Right click **silabser.inf** file and install it.
 
 ## For MacOS: users:
+
 1. Download **CP210x VCP Mac OSX Driver**, unzip it.
 2. Double click **SiLabsUSBDriverDIsk.dmg** and install CP210x VCP Driver.app.
+
+
 
 # Bike workshop 1
 
